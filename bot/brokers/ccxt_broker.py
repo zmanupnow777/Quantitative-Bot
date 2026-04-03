@@ -9,6 +9,7 @@ This is a skeleton implementation. To use it:
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 import pandas as pd
@@ -48,6 +49,8 @@ class CCXTBroker(BrokerInterface):
         self.exchange_id = exchange_id
         self.sandbox = sandbox
         self.exchange = None
+        self._pending_brackets: dict[str, dict] = {}
+        self._bracket_lock = threading.Lock()
 
     def connect(self, config: BotConfig) -> bool:
         try:
@@ -130,6 +133,13 @@ class CCXTBroker(BrokerInterface):
             order.order_id = result["id"]
             order.status = result.get("status", "open")
             order.filled_price = float(result.get("average", 0) or 0)
+
+            # Clean up bracket when a closing order goes through
+            closing_sides = {OrderSide.SELL, OrderSide.BUY}
+            if order.side in closing_sides and order.status in ("filled", "closed"):
+                with self._bracket_lock:
+                    self._pending_brackets.pop(order.symbol, None)
+
             return order
         except Exception as e:
             order.status = "error"
@@ -162,3 +172,57 @@ class CCXTBroker(BrokerInterface):
             return float(ticker.get("last", 0))
         except Exception:
             return 0.0
+
+    def check_brackets(self, symbol: str, current_price: float) -> Order | None:
+        """Check if a TP or SL bracket should trigger at the current price."""
+        with self._bracket_lock:
+            bracket = self._pending_brackets.get(symbol)
+            if bracket is None:
+                return None
+
+            triggered = False
+            fill_price = 0.0
+            reason = ""
+
+            if bracket["side"] == "long":
+                if current_price >= bracket["take_profit"]:
+                    triggered = True
+                    fill_price = bracket["take_profit"]
+                    reason = "take_profit"
+                elif current_price <= bracket["stop_loss"]:
+                    triggered = True
+                    fill_price = bracket["stop_loss"]
+                    reason = "stop_loss"
+            else:  # short
+                if current_price <= bracket["take_profit"]:
+                    triggered = True
+                    fill_price = bracket["take_profit"]
+                    reason = "take_profit"
+                elif current_price >= bracket["stop_loss"]:
+                    triggered = True
+                    fill_price = bracket["stop_loss"]
+                    reason = "stop_loss"
+
+            if not triggered:
+                return None
+
+        close_side = OrderSide.SELL if bracket["side"] == "long" else OrderSide.BUY
+        order = Order(
+            symbol=symbol,
+            side=close_side,
+            order_type=OrderType.MARKET,
+            qty=bracket["qty"],
+            price=fill_price,
+        )
+        logger.info(
+            "CCXT bracket %s triggered for %s at $%.4f (current $%.4f)",
+            reason, symbol, fill_price, current_price,
+        )
+        return self.submit_order(order)
+
+    def update_bracket_stop(self, symbol: str, new_stop: float) -> None:
+        """Update the trailing stop-loss for an open bracket."""
+        with self._bracket_lock:
+            bracket = self._pending_brackets.get(symbol)
+            if bracket is not None:
+                bracket["stop_loss"] = new_stop

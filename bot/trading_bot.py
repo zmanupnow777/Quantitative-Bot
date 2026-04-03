@@ -107,7 +107,8 @@ class TradingBot:
             return
 
         # Start background price monitor for sub-cycle bracket checking
-        if self.config.use_bracket_orders and isinstance(self.broker, (SimBroker, PaperBroker)):
+        from bot.brokers.ccxt_broker import CCXTBroker
+        if self.config.use_bracket_orders and isinstance(self.broker, (SimBroker, PaperBroker, CCXTBroker)):
             self._price_monitor = PriceMonitor(
                 broker=self.broker,
                 symbol=self.config.symbol,

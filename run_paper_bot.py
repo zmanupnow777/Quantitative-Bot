@@ -51,8 +51,6 @@ def main() -> None:
         risk_per_trade=args.risk,
         mode="paper",
         broker=args.broker,
-        # Bracket orders are simulated locally for ccxt testnet
-        use_bracket_orders=(args.broker != "ccxt"),
         log_file=log_file,
     )
 
