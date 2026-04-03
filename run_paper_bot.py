@@ -1,10 +1,18 @@
-"""Entry point for paper trading with the Alpaca paper API or local paper broker.
+"""Entry point for paper trading with the Alpaca paper API, local paper broker, or CCXT testnet.
 
 Usage:
-    python run_paper_bot.py                                    # Default: MA crossover on SPY
-    python run_paper_bot.py --strategy rsi --symbol AAPL       # RSI on Apple
+    python run_paper_bot.py                                             # Default: MA crossover on SPY
+    python run_paper_bot.py --strategy rsi --symbol AAPL               # RSI on Apple
     python run_paper_bot.py --strategy trend_delta --timeframe 1h
-    python run_paper_bot.py --broker alpaca                    # Use Alpaca paper API (needs keys)
+    python run_paper_bot.py --broker alpaca                            # Use Alpaca paper API (needs keys)
+    python run_paper_bot.py --broker ccxt --symbol BTC/USDT            # HyperLiquid testnet (default)
+    python run_paper_bot.py --broker ccxt --exchange binance --symbol ETH/USDT  # Other exchange testnet
+
+CCXT testnet setup (.env):
+    CCXT_EXCHANGE=hyperliquid   # or binance, bybit, etc.
+    CCXT_API_KEY=your_key
+    CCXT_API_SECRET=your_secret
+    CCXT_SANDBOX=true           # always true for paper trading
 """
 
 import argparse
@@ -23,8 +31,11 @@ def main() -> None:
     parser.add_argument("--timeframe", default="1d")
     parser.add_argument("--capital", type=float, default=100_000)
     parser.add_argument("--risk", type=float, default=0.02, help="Risk per trade as decimal (default 0.02 = 2%%)")
-    parser.add_argument("--broker", default="paper", choices=["paper", "alpaca"],
-                        help="paper = local sim with real prices; alpaca = Alpaca paper API")
+    parser.add_argument("--broker", default="paper", choices=["paper", "alpaca", "ccxt"],
+                        help="paper = local sim; alpaca = Alpaca paper API; ccxt = crypto exchange testnet")
+    parser.add_argument("--exchange", default=None,
+                        help="CCXT exchange ID (e.g. hyperliquid, binance, bybit). "
+                             "Overrides CCXT_EXCHANGE env var. Default: hyperliquid")
     parser.add_argument("--cycles", type=int, default=None, help="Max cycles to run (None = infinite)")
 
     args = parser.parse_args()
@@ -36,6 +47,8 @@ def main() -> None:
         risk_per_trade=args.risk,
         mode="paper",
         broker=args.broker,
+        # Bracket orders are simulated locally for ccxt testnet
+        use_bracket_orders=(args.broker != "ccxt"),
     )
 
     strategy = get_live_strategy(args.strategy)
@@ -43,6 +56,12 @@ def main() -> None:
     if args.broker == "alpaca":
         from bot.brokers.alpaca_broker import AlpacaBroker
         broker = AlpacaBroker()
+    elif args.broker == "ccxt":
+        import os
+        from bot.brokers.ccxt_broker import CCXTBroker
+        exchange_id = args.exchange or os.getenv("CCXT_EXCHANGE", "hyperliquid")
+        broker = CCXTBroker(exchange_id=exchange_id, sandbox=True)
+        print(f"[CCXT] Connecting to {exchange_id} testnet (sandbox=True)")
     else:
         broker = PaperBroker()
 

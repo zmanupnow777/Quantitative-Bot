@@ -272,11 +272,16 @@ class TradingBot:
             logger.warning("Position size is 0. Skipping.")
             return
 
-        qty = max(int(qty), 1)
+        # Use fractional qty for crypto (e.g. 0.001 BTC); whole shares for stocks.
+        if qty >= 1:
+            qty = max(int(qty), 1)
+        else:
+            qty = round(qty, 6)
 
         # For Alpaca: price=TP and stop_price=SL enable server-side brackets.
-        # For Paper/Sim: price=market price for fill; brackets registered separately.
-        is_alpaca = not isinstance(self.broker, (SimBroker, PaperBroker))
+        # For Paper/Sim/CCXT: price=market price for fill; brackets registered separately.
+        from bot.brokers.alpaca_broker import AlpacaBroker
+        is_alpaca = isinstance(self.broker, AlpacaBroker)
         order = Order(
             symbol=self.config.symbol,
             side=OrderSide.BUY if direction == "long" else OrderSide.SELL,
