@@ -92,6 +92,26 @@ def macd(
     return macd_line, signal_line, histogram
 
 
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, length: int) -> pd.Series:
+    """Return the Average True Range."""
+    prev_close = close.shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1).max(axis=1)
+    if ta is not None:
+        result = ta.atr(high, low, close, length=length)
+        if result is not None:
+            return result
+    return tr.rolling(length, min_periods=length).mean()
+
+
+def ewm_vol(returns: pd.Series, halflife: int) -> pd.Series:
+    """Return exponentially weighted annualised volatility."""
+    return returns.ewm(halflife=halflife, min_periods=halflife).std() * np.sqrt(252)
+
+
 def rolling_vwap(
     high: pd.Series,
     low: pd.Series,

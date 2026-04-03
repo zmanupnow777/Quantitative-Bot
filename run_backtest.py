@@ -14,15 +14,23 @@ from backtester import BacktestEngine, compare, generate_html_report, generate_r
 from config import settings
 from data.storage import DataStore
 from strategies import (
+    BBRSICombinedStrategy,
     BollingerBandStrategy,
+    CointegrationPairsStrategy,
+    CrossSectionalMomentumStrategy,
     DonchianBreakoutStrategy,
     EngulfingStrategy,
     MACrossoverStrategy,
     MACDTrendStrategy,
     MomentumStrategy,
+    MultiFactorStrategy,
+    OUMeanReversionStrategy,
+    OvernightGapReversionStrategy,
     PairsMeanReversionStrategy,
     RSIMeanReversionStrategy,
+    TimeSeriesMomentumStrategy,
     TrendDeltaStrategy,
+    VRPRegimeStrategy,
     VWAPReversionStrategy,
 )
 
@@ -55,6 +63,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--long-short", action="store_true", help="Enable short selling.")
     parser.add_argument("--force-refresh", action="store_true", help="Bypass cached market data.")
     parser.add_argument(
+        "--research", action="store_true",
+        help="Include the 8 research-grade strategies (TS momentum, OU, cointegration pairs, etc.).",
+    )
+    parser.add_argument(
         "--pair-map",
         nargs="*",
         default=[],
@@ -82,8 +94,15 @@ def parse_pair_map(raw_items: list[str]) -> dict[str, str]:
     return mappings
 
 
-def build_strategy_suite(pair_symbol: str | None) -> list:
-    """Build the default strategy suite for a symbol."""
+def build_strategy_suite(pair_symbol: str | None, *, research: bool = False) -> list:
+    """Build the strategy suite for a symbol.
+
+    Args:
+        pair_symbol: Secondary symbol for pairs strategies, or None.
+        research:    When True, include the 8 new research-grade strategies in
+                     addition to the original Project 2 suite.
+                     Pass ``--research`` on the CLI to enable.
+    """
     strategies = [
         MACrossoverStrategy(),
         RSIMeanReversionStrategy(),
@@ -97,6 +116,20 @@ def build_strategy_suite(pair_symbol: str | None) -> list:
     ]
     if pair_symbol:
         strategies.append(PairsMeanReversionStrategy(pair_symbol=pair_symbol))
+
+    if research:
+        strategies += [
+            TimeSeriesMomentumStrategy(),
+            OvernightGapReversionStrategy(),
+            OUMeanReversionStrategy(),
+            BBRSICombinedStrategy(),
+            VRPRegimeStrategy(),
+            CrossSectionalMomentumStrategy(),
+            MultiFactorStrategy(),
+        ]
+        if pair_symbol:
+            strategies.append(CointegrationPairsStrategy(pair_symbol=pair_symbol))
+
     return strategies
 
 
@@ -198,8 +231,12 @@ def run_suite(args: argparse.Namespace) -> tuple[list, dict[str, Path], pd.DataF
             else:
                 logger.warning("Pair data unavailable for %s; skipping pairs strategy.", pair_symbol)
 
-        for strategy in build_strategy_suite(pair_symbol if pair_frame is not None else None):
-            dataset = pair_frame if isinstance(strategy, PairsMeanReversionStrategy) else primary
+        _pairs = (PairsMeanReversionStrategy, CointegrationPairsStrategy)
+        for strategy in build_strategy_suite(
+            pair_symbol if pair_frame is not None else None,
+            research=args.research,
+        ):
+            dataset = pair_frame if isinstance(strategy, _pairs) else primary
             if dataset is None or dataset.empty:
                 logger.warning("Skipping %s on %s due to missing input data.", strategy.name, normalized_symbol)
                 continue
