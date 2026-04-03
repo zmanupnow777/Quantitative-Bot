@@ -40,6 +40,10 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Give each bot its own log file so running two in parallel doesn't interleave logs.
+    safe_symbol = args.symbol.replace("/", "-")
+    log_file = f"logs/bot_{args.broker}_{safe_symbol}.log"
+
     config = BotConfig(
         symbol=args.symbol,
         timeframe=args.timeframe,
@@ -49,6 +53,7 @@ def main() -> None:
         broker=args.broker,
         # Bracket orders are simulated locally for ccxt testnet
         use_bracket_orders=(args.broker != "ccxt"),
+        log_file=log_file,
     )
 
     strategy = get_live_strategy(args.strategy)
