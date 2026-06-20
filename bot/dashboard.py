@@ -92,7 +92,9 @@ with tab_pos:
 
         styled = positions_df.style.format(fmt)
         if "direction" in positions_df.columns:
-            styled = styled.applymap(_color_direction, subset=["direction"])
+            # pandas >= 2.1 renamed Styler.applymap -> Styler.map (applymap removed in 3.0)
+            _style_cell = getattr(styled, "map", None) or styled.applymap
+            styled = _style_cell(_color_direction, subset=["direction"])
         st.dataframe(styled, use_container_width=True, hide_index=True)
 
 # ── Tab 2: Signal Feed ────────────────────────────────────────────────
@@ -282,7 +284,8 @@ if not journal_entries:
 for entry in journal_entries:
     ts = entry.get("timestamp", "")[:19].replace("T", " ")
     st.markdown(f"**{ts} — {entry.get('kind','')} {entry.get('symbol','')}**")
-    st.write(entry.get("narrative", ""))
+    # Escape '$' so Streamlit's markdown doesn't parse dollar amounts as LaTeX math
+    st.markdown(entry.get("narrative", "").replace("$", "\\$"))
     terms = entry.get("terms") or []
     if terms:
         st.caption("Terms: " + ", ".join(terms))
