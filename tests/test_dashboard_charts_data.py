@@ -95,3 +95,12 @@ def test_compute_drawdown():
 
 def test_compute_drawdown_empty():
     assert dd.compute_drawdown(pd.Series(dtype=float)).empty
+
+
+def test_build_trade_pnls_empty():
+    assert dd.build_trade_pnls([]).empty
+
+
+def test_empty_marker_and_pnl_frames_have_columns():
+    assert list(dd.get_trade_markers([]).columns) == ["timestamp", "price", "side", "kind"]
+    assert list(dd.build_trade_pnls([]).columns) == ["timestamp", "symbol", "pnl", "won"]

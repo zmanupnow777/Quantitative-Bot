@@ -278,7 +278,7 @@ def get_trade_markers(events: list[dict]) -> pd.DataFrame:
                 "side": "sell" if e.get("side") == "long" else "buy",
                 "kind": "exit",
             })
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=["timestamp", "price", "side", "kind"])
 
 
 def build_equity_series(events: list[dict], initial_capital: float = 100_000.0) -> pd.Series:
@@ -298,7 +298,7 @@ def build_equity_series(events: list[dict], initial_capital: float = 100_000.0) 
     closes = [e for e in events if e.get("event") == "position_closed"]
     if not closes:
         return pd.Series(dtype=float)
-    closes.sort(key=lambda e: e.get("timestamp", ""))
+    closes.sort(key=lambda e: pd.to_datetime(e.get("timestamp")))
     times = [pd.to_datetime(e.get("timestamp")) for e in closes]
     pnls = [float(e.get("pnl", 0.0)) for e in closes]
     equity = initial_capital + pd.Series(pnls).cumsum()
@@ -318,16 +318,18 @@ def build_trade_pnls(events: list[dict]) -> pd.DataFrame:
         DataFrame with columns: timestamp (datetime), symbol (str), pnl (float), won (bool).
         Empty DataFrame if no position_closed events.
     """
-    rows = [
-        {
+    rows = []
+    for e in events:
+        if e.get("event") != "position_closed":
+            continue
+        pnl = float(e.get("pnl", 0.0))
+        rows.append({
             "timestamp": pd.to_datetime(e.get("timestamp")),
             "symbol": e.get("symbol", "?"),
-            "pnl": float(e.get("pnl", 0.0)),
-            "won": float(e.get("pnl", 0.0)) > 0,
-        }
-        for e in events if e.get("event") == "position_closed"
-    ]
-    return pd.DataFrame(rows)
+            "pnl": pnl,
+            "won": pnl > 0,
+        })
+    return pd.DataFrame(rows, columns=["timestamp", "symbol", "pnl", "won"])
 
 
 def compute_drawdown(equity: pd.Series) -> pd.Series:
