@@ -53,6 +53,70 @@ class Explainer:
             logger.exception("Explainer.explain_entry failed; trading continues")
             return "", []
 
+    _EXIT_PHRASES = {
+        "stop_loss": "hit its stop-loss",
+        "take_profit": "hit its take-profit target",
+        "strategy": "the strategy signalled an exit",
+        "kill_switch": "the kill switch fired",
+    }
+
+    def explain_exit(self, event: dict) -> tuple[str, list[str]]:
+        """Narrate a position close. Returns (narrative, glossary_terms)."""
+        try:
+            symbol = event.get("symbol", "?")
+            qty = event.get("qty", 0)
+            exit_price = float(event.get("exit_price", 0.0))
+            pnl = float(event.get("pnl", 0.0))
+            pnl_pct = float(event.get("pnl_pct", 0.0))
+            reason = event.get("exit_reason", "strategy")
+            phrase = self._EXIT_PHRASES.get(reason, f"a risk rule fired ({reason})")
+            outcome = "a profit" if pnl >= 0 else "a loss"
+            side = event.get("side", "long")
+            verb = "Sold" if side == "long" else "Covered"
+            narrative = (
+                f"{verb} {qty} {symbol} @ ${exit_price:,.2f} because it {phrase}. "
+                f"Booked {outcome} of ${pnl:,.2f} ({pnl_pct:.2%})."
+            )
+            return narrative, self._emit("exit", symbol, narrative)
+        except Exception:
+            logger.exception("Explainer.explain_exit failed; trading continues")
+            return "", []
+
+    _RISK_PHRASES = {
+        "daily_loss_limit": "Daily loss limit breached — the kill switch halted trading for the day.",
+        "max_positions": "Max open positions reached — no new trade was opened.",
+        "max_daily_trades": "Daily trade cap reached — no new trade was opened.",
+        "position_size_zero": "Risk sizing came out to zero shares — trade skipped.",
+    }
+
+    def explain_risk_event(self, event: dict) -> tuple[str, list[str]]:
+        """Narrate a risk veto / kill-switch / bracket trigger."""
+        try:
+            reason = event.get("reason", "unknown")
+            symbol = event.get("symbol", "")
+            narrative = self._RISK_PHRASES.get(reason, f"Risk manager event: {reason}.")
+            return narrative, self._emit("risk", symbol or "-", narrative)
+        except Exception:
+            logger.exception("Explainer.explain_risk_event failed; trading continues")
+            return "", []
+
+    def daily_digest(self, account_info: dict) -> tuple[str, list[str]]:
+        """Narrate an end-of-day summary."""
+        try:
+            value = float(account_info.get("portfolio_value", 0.0))
+            cash = float(account_info.get("cash", 0.0))
+            pnl = float(account_info.get("daily_pnl", 0.0))
+            trades = int(account_info.get("trades_today", 0))
+            head = "Held — no action today. " if trades == 0 else f"{trades} trade(s) today. "
+            narrative = (
+                f"{head}End of day: portfolio ${value:,.2f}, cash ${cash:,.2f}, "
+                f"daily PnL ${pnl:,.2f}."
+            )
+            return narrative, self._emit("digest", "-", narrative)
+        except Exception:
+            logger.exception("Explainer.daily_digest failed; trading continues")
+            return "", []
+
     def _emit(self, kind: str, symbol: str, narrative: str) -> list[str]:
         """Detect glossary terms, append to md + jsonl. Best-effort."""
         terms = detect_terms(narrative)

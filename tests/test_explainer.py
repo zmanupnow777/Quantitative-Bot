@@ -49,3 +49,41 @@ def test_explain_entry_swallows_errors(tmp_path: Path, monkeypatch):
     narrative, terms = ex.explain_entry(_entry_event(), _data(), "bollinger_band", {})
     assert narrative == ""
     assert terms == []
+
+
+def test_explain_exit_uses_reason_and_pnl(tmp_path: Path):
+    ex = Explainer(log_dir=tmp_path)
+    event = {
+        "symbol": "SPY", "side": "long", "qty": 10, "entry_price": 90.0,
+        "exit_price": 94.0, "pnl": 40.0, "pnl_pct": 0.044, "exit_reason": "take_profit",
+    }
+    narrative, _terms = ex.explain_exit(event)
+    assert "take-profit" in narrative
+    assert "profit" in narrative.lower()
+    assert "$40" in narrative
+
+
+def test_explain_exit_loss_wording(tmp_path: Path):
+    ex = Explainer(log_dir=tmp_path)
+    event = {
+        "symbol": "SPY", "side": "long", "qty": 10, "entry_price": 90.0,
+        "exit_price": 88.0, "pnl": -20.0, "pnl_pct": -0.022, "exit_reason": "stop_loss",
+    }
+    narrative, _terms = ex.explain_exit(event)
+    assert "stop-loss" in narrative
+    assert "loss" in narrative.lower()
+
+
+def test_explain_risk_event_kill_switch(tmp_path: Path):
+    ex = Explainer(log_dir=tmp_path)
+    narrative, terms = ex.explain_risk_event({"reason": "daily_loss_limit"})
+    assert "kill switch" in narrative.lower() or "halt" in narrative.lower()
+    assert narrative
+
+
+def test_daily_digest_no_trades_says_held(tmp_path: Path):
+    ex = Explainer(log_dir=tmp_path)
+    narrative, _terms = ex.daily_digest(
+        {"portfolio_value": 100000.0, "cash": 100000.0, "daily_pnl": 0.0, "trades_today": 0}
+    )
+    assert "Held" in narrative or "no action" in narrative.lower()
