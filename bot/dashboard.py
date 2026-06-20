@@ -12,6 +12,7 @@ import streamlit as st
 # Anchor project root so imports work when launched from any cwd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bot.dashboard_data as dd  # noqa: E402
+import bot.dashboard_charts as dc  # noqa: E402
 
 st.set_page_config(
     page_title="Trading Dashboard",
@@ -65,9 +66,9 @@ else:
 st.divider()
 
 # ── tabs ─────────────────────────────────────────────────────────────
-tab_pos, tab_sig, tab_bt, tab_lvbt, tab_risk = st.tabs([
+tab_pos, tab_sig, tab_bt, tab_lvbt, tab_risk, tab_charts = st.tabs([
     "Live Positions", "Signal Feed", "Backtest Results",
-    "Live vs Backtest", "Risk Status",
+    "Live vs Backtest", "Risk Status", "📈 Charts",
 ])
 
 # ── Tab 1: Live Positions ─────────────────────────────────────────────
@@ -276,6 +277,45 @@ with tab_risk:
         st.info("No risk events recorded.")
     else:
         st.dataframe(risk_df, use_container_width=True, hide_index=True)
+
+# ── Tab 6: Charts ─────────────────────────────────────────────────────
+with tab_charts:
+    st.subheader("Price & Bollinger Bands")
+    symbols = dd.list_cached_symbols()
+    if not symbols:
+        st.info("No cached price data found. Run a backtest or data fetch first.")
+    else:
+        default_idx = symbols.index("SPY") if "SPY" in symbols else 0
+        sym = st.selectbox("Symbol", symbols, index=default_idx)
+        price = dd.load_price_window(sym, "1d", bars=250)
+        if price.empty:
+            st.info(f"No cached price data for {sym}.")
+        else:
+            markers = dd.get_trade_markers(events)
+            st.plotly_chart(dc.price_band_figure(price, markers), use_container_width=True)
+            st.caption("Bands use length=20, std_dev=2.0 — the same as the deployed strategy. "
+                       "Price is as fresh as the last data fetch.")
+
+    equity = dd.build_equity_series(events)
+    pnls = dd.build_trade_pnls(events)
+
+    st.subheader("Account Value")
+    if equity.empty:
+        st.caption("No trades yet — this populates once the bot closes its first trade.")
+    else:
+        st.plotly_chart(dc.equity_figure(equity), use_container_width=True)
+
+    st.subheader("Per-Trade PnL")
+    if pnls.empty:
+        st.caption("No trades yet — this populates once the bot closes its first trade.")
+    else:
+        st.plotly_chart(dc.trade_pnl_figure(pnls), use_container_width=True)
+
+    st.subheader("Drawdown")
+    if equity.empty:
+        st.caption("No trades yet — this populates once the bot closes its first trade.")
+    else:
+        st.plotly_chart(dc.drawdown_figure(dd.compute_drawdown(equity)), use_container_width=True)
 
 st.markdown("---")
 st.subheader("\U0001F4D3 Journal")
