@@ -43,3 +43,9 @@ def test_unknown_strategy_uses_generic_reason():
     assert reason["rule"] == "strategy_signal"
     assert reason["zone"] is None
     assert reason["close"] == 90.0
+
+
+def test_bollinger_empty_dataframe_falls_back_gracefully():
+    reason = derive_reason("bollinger_band", pd.DataFrame({"Close": []}), "long", {"length": 20, "std_dev": 2.0})
+    assert reason["rule"] == "strategy_signal"
+    assert reason["close"] is None

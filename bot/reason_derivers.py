@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 def derive_bollinger_reason(data: pd.DataFrame, direction: str, params: dict) -> dict:
     """Recompute the Bollinger band the latest close crossed."""
+    if data.empty:
+        return derive_generic_reason(data, direction, params)
     length = int(params.get("length", 20))
     std_dev = float(params.get("std_dev", 2.0))
     close = float(data["Close"].iloc[-1])
