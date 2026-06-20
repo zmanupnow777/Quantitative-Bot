@@ -19,6 +19,7 @@ REPORTS_DIR  = settings.REPORTS_DIR
 LOGS_DIR     = settings.LOGS_DIR
 DAILY_DIR    = LOGS_DIR / "daily"
 TRADES_JSONL = LOGS_DIR / "trades.jsonl"
+JOURNAL_JSONL = LOGS_DIR / "journal.jsonl"
 BOT_LOG      = LOGS_DIR / "trading_bot.log"
 
 
@@ -190,3 +191,26 @@ def detect_mode() -> str:
         if time.time() - BOT_LOG.stat().st_mtime < 120:
             return "live"
     return "static"
+
+
+def load_journal(limit: int = 50) -> list[dict]:
+    """Return the most recent journal records (newest first), or [] if missing."""
+    if not JOURNAL_JSONL.exists():
+        return []
+    records: list[dict] = []
+    with JOURNAL_JSONL.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    records.reverse()
+    return records[:limit]
+
+
+def load_glossary() -> dict[str, str]:
+    """Return the glossary term -> definition map."""
+    from bot.glossary import GLOSSARY
+    return dict(GLOSSARY)

@@ -27,6 +27,8 @@ metrics = dd.load_backtest_metrics()
 curves  = dd.load_equity_curves()
 mode    = dd.detect_mode()
 kill    = dd.get_kill_switch_status(events)
+journal_entries = dd.load_journal(limit=50)
+glossary = dd.load_glossary()
 
 # ── sidebar ──────────────────────────────────────────────────────────
 with st.sidebar:
@@ -272,6 +274,22 @@ with tab_risk:
         st.info("No risk events recorded.")
     else:
         st.dataframe(risk_df, use_container_width=True, hide_index=True)
+
+st.markdown("---")
+st.subheader("\U0001F4D3 Journal")
+if not journal_entries:
+    st.caption("No journal entries yet — the bot will explain each decision here.")
+for entry in journal_entries:
+    ts = entry.get("timestamp", "")[:19].replace("T", " ")
+    st.markdown(f"**{ts} — {entry.get('kind','')} {entry.get('symbol','')}**")
+    st.write(entry.get("narrative", ""))
+    terms = entry.get("terms") or []
+    if terms:
+        st.caption("Terms: " + ", ".join(terms))
+
+with st.expander("\U0001F4D6 Glossary"):
+    for term, definition in glossary.items():
+        st.markdown(f"**{term}** — {definition}")
 
 # ── auto-refresh ──────────────────────────────────────────────────────
 if auto_refresh:
