@@ -44,3 +44,13 @@ def test_drawdown_figure_returns_figure():
     dd_series = pd.Series([0.0, -0.004],
                           index=pd.to_datetime(["2024-02-02", "2024-02-03"]))
     assert isinstance(dc.drawdown_figure(dd_series), go.Figure)
+
+
+def test_price_band_figure_tz_aware_markers_do_not_raise():
+    price = _price()
+    markers = pd.DataFrame({
+        "timestamp": pd.to_datetime(["2024-01-10", "2024-02-01"]).tz_localize("UTC"),
+        "price": [9.0, 31.0], "side": ["buy", "sell"], "kind": ["entry", "exit"],
+    })
+    fig = dc.price_band_figure(price, markers)
+    assert isinstance(fig, go.Figure)

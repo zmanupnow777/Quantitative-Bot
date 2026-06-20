@@ -348,4 +348,5 @@ def compute_drawdown(equity: pd.Series) -> pd.Series:
     if equity.empty:
         return pd.Series(dtype=float)
     peak = equity.cummax()
-    return (equity - peak) / peak
+    drawdown = (equity - peak) / peak.replace(0, np.nan)
+    return drawdown.fillna(0.0)

@@ -104,3 +104,12 @@ def test_build_trade_pnls_empty():
 def test_empty_marker_and_pnl_frames_have_columns():
     assert list(dd.get_trade_markers([]).columns) == ["timestamp", "price", "side", "kind"]
     assert list(dd.build_trade_pnls([]).columns) == ["timestamp", "symbol", "pnl", "won"]
+
+
+def test_compute_drawdown_handles_zero_peak():
+    import numpy as np
+    eq = pd.Series([0.0, -10.0], index=pd.to_datetime(["2024-01-01", "2024-01-02"]))
+    out = dd.compute_drawdown(eq)
+    assert not out.isna().any()
+    assert not np.isinf(out).any()
+    assert out.iloc[0] == 0.0

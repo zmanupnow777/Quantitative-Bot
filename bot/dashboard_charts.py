@@ -19,19 +19,22 @@ def price_band_figure(
     lower, middle, upper = bollinger_bands(close, length, std_dev)
 
     fig = go.Figure()
+    fig.add_trace(go.Scatter(x=price.index, y=lower, mode="lines",
+                             line=dict(width=1, color="rgba(150,150,150,0.5)"), name="Lower band"))
     fig.add_trace(go.Scatter(x=price.index, y=upper, mode="lines",
-                             line=dict(width=1, color="rgba(150,150,150,0.5)"), name="Upper band"))
+                             line=dict(width=1, color="rgba(150,150,150,0.5)"),
+                             fill="tonexty", fillcolor="rgba(150,150,150,0.08)", name="Upper band"))
     fig.add_trace(go.Scatter(x=price.index, y=middle, mode="lines",
                              line=dict(width=1, color="rgba(150,150,150,0.8)", dash="dot"), name="Mid"))
-    fig.add_trace(go.Scatter(x=price.index, y=lower, mode="lines",
-                             line=dict(width=1, color="rgba(150,150,150,0.5)"),
-                             fill="tonexty", fillcolor="rgba(150,150,150,0.08)", name="Lower band"))
     fig.add_trace(go.Scatter(x=price.index, y=close, mode="lines",
                              line=dict(width=2, color="#2b8cbe"), name="Close"))
 
     if not markers.empty:
         lo, hi = price.index.min(), price.index.max()
-        in_window = markers[(markers["timestamp"] >= lo) & (markers["timestamp"] <= hi)]
+        mt = markers["timestamp"]
+        if getattr(mt.dt, "tz", None) is not None:
+            mt = mt.dt.tz_localize(None)
+        in_window = markers[(mt >= lo) & (mt <= hi)]
         buys = in_window[in_window["side"] == "buy"]
         sells = in_window[in_window["side"] == "sell"]
         if not buys.empty:
