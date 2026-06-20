@@ -258,8 +258,10 @@ class TradingBot:
         else:
             # 6. Check for entry
             if not self.risk_manager.check_max_positions(len(positions)):
+                self.explainer.explain_risk_event({"reason": "max_positions", "symbol": self.config.symbol})
                 return
             if not self.risk_manager.check_max_daily_trades():
+                self.explainer.explain_risk_event({"reason": "max_daily_trades", "symbol": self.config.symbol})
                 return
 
             direction = self.strategy.should_enter(data)
@@ -292,6 +294,7 @@ class TradingBot:
 
         if qty <= 0:
             logger.warning("Position size is 0. Skipping.")
+            self.explainer.explain_risk_event({"reason": "position_size_zero", "symbol": self.config.symbol})
             return
 
         qty = max(int(qty), 1)

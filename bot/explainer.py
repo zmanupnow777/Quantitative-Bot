@@ -70,7 +70,7 @@ class Explainer:
             pnl_pct = float(event.get("pnl_pct", 0.0))
             reason = event.get("exit_reason", "strategy")
             phrase = self._EXIT_PHRASES.get(reason, f"a risk rule fired ({reason})")
-            outcome = "a profit" if pnl >= 0 else "a loss"
+            outcome = "a profit" if pnl > 0 else "a loss"
             side = event.get("side", "long")
             verb = "Sold" if side == "long" else "Covered"
             narrative = (
@@ -82,19 +82,28 @@ class Explainer:
             logger.exception("Explainer.explain_exit failed; trading continues")
             return "", []
 
-    _RISK_PHRASES = {
-        "daily_loss_limit": "Daily loss limit breached — the kill switch halted trading for the day.",
-        "max_positions": "Max open positions reached — no new trade was opened.",
-        "max_daily_trades": "Daily trade cap reached — no new trade was opened.",
-        "position_size_zero": "Risk sizing came out to zero shares — trade skipped.",
-    }
-
     def explain_risk_event(self, event: dict) -> tuple[str, list[str]]:
         """Narrate a risk veto / kill-switch / bracket trigger."""
         try:
-            reason = event.get("reason", "unknown")
+            reason = str(event.get("reason", "unknown"))
             symbol = event.get("symbol", "")
-            narrative = self._RISK_PHRASES.get(reason, f"Risk manager event: {reason}.")
+            low = reason.lower()
+            if reason == "daily_loss_limit" or "daily loss" in low or "exceeds limit" in low:
+                narrative = "Daily loss limit breached — the kill switch halted trading for the day."
+            elif reason == "max_positions" or "max position" in low:
+                narrative = "Max open positions reached — no new trade was opened."
+            elif reason == "max_daily_trades" or "daily trade" in low:
+                narrative = "Daily trade cap reached — no new trade was opened."
+            elif reason == "position_size_zero" or ("size" in low and "zero" in low):
+                narrative = "Risk sizing came out to zero shares — trade skipped."
+            elif "bracket" in low:
+                narrative = f"A bracket order (stop-loss / take-profit) triggered for {symbol or 'the position'}."
+            elif "stop loss" in low or "stop-loss" in low:
+                narrative = f"Stop-loss hit on {symbol or 'the position'} — the risk manager closed it."
+            elif "take profit" in low or "take-profit" in low:
+                narrative = f"Take-profit hit on {symbol or 'the position'} — the risk manager closed it."
+            else:
+                narrative = f"Risk manager event: {reason}."
             return narrative, self._emit("risk", symbol or "-", narrative)
         except Exception:
             logger.exception("Explainer.explain_risk_event failed; trading continues")

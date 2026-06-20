@@ -87,3 +87,19 @@ def test_daily_digest_no_trades_says_held(tmp_path: Path):
         {"portfolio_value": 100000.0, "cash": 100000.0, "daily_pnl": 0.0, "trades_today": 0}
     )
     assert "Held" in narrative or "no action" in narrative.lower()
+
+
+def test_explain_risk_event_real_kill_reason_string(tmp_path: Path):
+    ex = Explainer(log_dir=tmp_path)
+    narrative, _t = ex.explain_risk_event({"reason": "Daily loss -5.20% exceeds limit -5.00%"})
+    assert "kill switch" in narrative.lower()
+
+
+def test_new_methods_swallow_errors(tmp_path: Path, monkeypatch):
+    ex = Explainer(log_dir=tmp_path)
+    # Force _emit to raise; every public method must still return ("", []) not raise.
+    monkeypatch.setattr(ex, "_emit", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert ex.explain_exit({"symbol": "SPY", "side": "long", "qty": 1, "entry_price": 1.0,
+                            "exit_price": 1.0, "pnl": 0.0, "pnl_pct": 0.0, "exit_reason": "strategy"}) == ("", [])
+    assert ex.explain_risk_event({"reason": "max_positions"}) == ("", [])
+    assert ex.daily_digest({"portfolio_value": 1.0, "cash": 1.0, "daily_pnl": 0.0, "trades_today": 0}) == ("", [])
