@@ -5,6 +5,7 @@ The UI layer (dashboard.py) never opens file handles directly.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from datetime import date
@@ -14,6 +15,8 @@ import numpy as np
 import pandas as pd
 
 from config import settings
+
+logger = logging.getLogger(__name__)
 
 REPORTS_DIR  = settings.REPORTS_DIR
 LOGS_DIR     = settings.LOGS_DIR
@@ -214,3 +217,32 @@ def load_glossary() -> dict[str, str]:
     """Return the glossary term -> definition map."""
     from bot.glossary import GLOSSARY
     return dict(GLOSSARY)
+
+
+def list_cached_symbols() -> list[str]:
+    """Return sorted symbol names that have cached price parquet files."""
+    cache_dir = settings.DATA_DIR
+    if not cache_dir.exists():
+        return []
+    symbols = [
+        p.name for p in cache_dir.iterdir()
+        if p.is_dir() and any(p.glob("*.parquet"))
+    ]
+    return sorted(symbols)
+
+
+def load_price_window(symbol: str, timeframe: str = "1d", bars: int = 250) -> pd.DataFrame:
+    """Return the last ``bars`` rows of cached OHLCV data for ``symbol``.
+
+    Reads ``settings.DATA_DIR/<symbol>/<timeframe>.parquet``. Returns an empty
+    DataFrame if the file is missing or cannot be read.
+    """
+    path = settings.DATA_DIR / symbol / f"{timeframe}.parquet"
+    if not path.exists():
+        return pd.DataFrame()
+    try:
+        df = pd.read_parquet(path)
+    except Exception:  # noqa: BLE001 - corrupt/unreadable cache is "no data"
+        logger.warning("Could not read price cache %s", path)
+        return pd.DataFrame()
+    return df.tail(bars)
