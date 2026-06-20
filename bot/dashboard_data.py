@@ -246,3 +246,104 @@ def load_price_window(symbol: str, timeframe: str = "1d", bars: int = 250) -> pd
         logger.warning("Could not read price cache %s", path)
         return pd.DataFrame()
     return df.tail(bars)
+
+
+def get_trade_markers(events: list[dict]) -> pd.DataFrame:
+    """Return entry/exit markers (timestamp, price, side, kind) from trade events.
+
+    Extracts position_opened and position_closed events from the event stream,
+    converting them to chart markers. Returns empty DataFrame if no trade events.
+
+    Args:
+        events: List of event dicts, each with "event" key and trade data.
+
+    Returns:
+        DataFrame with columns: timestamp (datetime), price (float), side (str),
+        kind (str). Empty DataFrame if no trade events.
+    """
+    rows: list[dict] = []
+    for e in events:
+        ev = e.get("event")
+        if ev == "position_opened":
+            rows.append({
+                "timestamp": pd.to_datetime(e.get("timestamp")),
+                "price": float(e.get("price", 0.0)),
+                "side": "buy" if e.get("direction") == "long" else "sell",
+                "kind": "entry",
+            })
+        elif ev == "position_closed":
+            rows.append({
+                "timestamp": pd.to_datetime(e.get("timestamp")),
+                "price": float(e.get("exit_price", 0.0)),
+                "side": "sell" if e.get("side") == "long" else "buy",
+                "kind": "exit",
+            })
+    return pd.DataFrame(rows)
+
+
+def build_equity_series(events: list[dict], initial_capital: float = 100_000.0) -> pd.Series:
+    """Return cumulative account value over closed-trade timestamps.
+
+    Extracts position_closed events, sorts by timestamp, and computes cumulative
+    equity as initial_capital + cumsum(pnl). Returns empty Series if no closes.
+
+    Args:
+        events: List of event dicts containing position_closed events.
+        initial_capital: Starting account value.
+
+    Returns:
+        Series indexed by close timestamp with cumulative equity values.
+        Empty Series if no position_closed events.
+    """
+    closes = [e for e in events if e.get("event") == "position_closed"]
+    if not closes:
+        return pd.Series(dtype=float)
+    closes.sort(key=lambda e: e.get("timestamp", ""))
+    times = [pd.to_datetime(e.get("timestamp")) for e in closes]
+    pnls = [float(e.get("pnl", 0.0)) for e in closes]
+    equity = initial_capital + pd.Series(pnls).cumsum()
+    return pd.Series(equity.values, index=pd.DatetimeIndex(times))
+
+
+def build_trade_pnls(events: list[dict]) -> pd.DataFrame:
+    """Return one row per closed trade: timestamp, symbol, pnl, won.
+
+    Extracts position_closed events and adds a "won" column (bool) indicating
+    whether pnl > 0. Returns empty DataFrame if no closes.
+
+    Args:
+        events: List of event dicts containing position_closed events.
+
+    Returns:
+        DataFrame with columns: timestamp (datetime), symbol (str), pnl (float), won (bool).
+        Empty DataFrame if no position_closed events.
+    """
+    rows = [
+        {
+            "timestamp": pd.to_datetime(e.get("timestamp")),
+            "symbol": e.get("symbol", "?"),
+            "pnl": float(e.get("pnl", 0.0)),
+            "won": float(e.get("pnl", 0.0)) > 0,
+        }
+        for e in events if e.get("event") == "position_closed"
+    ]
+    return pd.DataFrame(rows)
+
+
+def compute_drawdown(equity: pd.Series) -> pd.Series:
+    """Return the underwater curve (<=0 fraction) of an equity series.
+
+    Computes (equity - equity.cummax()) / equity.cummax(), yielding 0 at peaks
+    and negative values during drawdowns. Returns empty Series if input is empty.
+
+    Args:
+        equity: Series of equity values, typically from build_equity_series.
+
+    Returns:
+        Series with same index as input, containing drawdown fractions.
+        Empty Series if input is empty.
+    """
+    if equity.empty:
+        return pd.Series(dtype=float)
+    peak = equity.cummax()
+    return (equity - peak) / peak
