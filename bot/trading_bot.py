@@ -16,6 +16,7 @@ from bot.live_strategy import LiveStrategyAdapter
 from bot.monitor import TerminalMonitor
 from bot.price_monitor import PriceMonitor
 from bot.risk_manager import RiskManager
+from bot.explainer import Explainer
 from bot.trade_logger import TradeLogger
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,7 @@ class TradingBot:
         self.strategy = strategy
         self.risk_manager = RiskManager(config)
         self.trade_logger = TradeLogger(log_dir="logs")
+        self.explainer = Explainer(log_dir="logs")
         self.monitor = TerminalMonitor(config)
         self.running = False
         self._last_signal: dict | None = None
@@ -111,11 +113,18 @@ class TradingBot:
             self._price_monitor = PriceMonitor(
                 broker=self.broker,
                 symbol=self.config.symbol,
-                on_bracket_fill=lambda order: self.trade_logger.log_risk_event({
-                    "reason": "bracket_order_triggered_by_monitor",
-                    "symbol": order.symbol,
-                    "fill_price": order.filled_price,
-                }),
+                on_bracket_fill=lambda order: (
+                    self.trade_logger.log_risk_event({
+                        "reason": "bracket_order_triggered_by_monitor",
+                        "symbol": order.symbol,
+                        "fill_price": order.filled_price,
+                    }),
+                    self.explainer.explain_risk_event({
+                        "reason": "bracket_order_triggered_by_monitor",
+                        "symbol": order.symbol,
+                        "fill_price": order.filled_price,
+                    }),
+                ),
                 check_interval=5.0,
             )
             self._price_monitor.start()
@@ -170,6 +179,7 @@ class TradingBot:
         # 3. Daily loss limit check
         if not self.risk_manager.check_daily_loss_limit(account):
             self.trade_logger.log_risk_event({"reason": self.risk_manager.kill_reason})
+            self.explainer.explain_risk_event({"reason": self.risk_manager.kill_reason})
             self.running = False
             return
 
@@ -188,6 +198,11 @@ class TradingBot:
             if bracket_result and bracket_result.status == "filled":
                 logger.info("Bracket order triggered for %s — position closed by broker", self.config.symbol)
                 self.trade_logger.log_risk_event({
+                    "reason": "bracket_order_triggered",
+                    "symbol": self.config.symbol,
+                    "fill_price": bracket_result.filled_price,
+                })
+                self.explainer.explain_risk_event({
                     "reason": "bracket_order_triggered",
                     "symbol": self.config.symbol,
                     "fill_price": bracket_result.filled_price,
@@ -229,10 +244,17 @@ class TradingBot:
             if risk_reason:
                 logger.info("Risk exit: %s", risk_reason)
                 self.trade_logger.log_risk_event({"reason": risk_reason, "symbol": pos.symbol})
-                self._close_position(pos, current_price)
+                self.explainer.explain_risk_event({"reason": risk_reason, "symbol": pos.symbol})
+                if "stop" in risk_reason.lower():
+                    exit_reason = "stop_loss"
+                elif "take" in risk_reason.lower() or "profit" in risk_reason.lower():
+                    exit_reason = "take_profit"
+                else:
+                    exit_reason = f"risk:{risk_reason}"
+                self._close_position(pos, current_price, exit_reason)
             elif self.strategy.should_exit(data, pos):
                 logger.info("Strategy exit signal for %s", pos.symbol)
-                self._close_position(pos, current_price)
+                self._close_position(pos, current_price, "strategy")
         else:
             # 6. Check for entry
             if not self.risk_manager.check_max_positions(len(positions)):
@@ -250,7 +272,7 @@ class TradingBot:
 
             if direction:
                 logger.info("Entry signal: %s %s", direction, self.config.symbol)
-                self._open_position(direction, current_price, account["cash"])
+                self._open_position(direction, current_price, account["cash"], data)
 
         # 7. Display monitor
         risk_status = {
@@ -262,7 +284,7 @@ class TradingBot:
         broker_trades = getattr(self.broker, "trade_log", [])
         self.monitor.display(account, positions, broker_trades, risk_status, self._last_signal)
 
-    def _open_position(self, direction: str, price: float, available_cash: float) -> None:
+    def _open_position(self, direction: str, price: float, available_cash: float, data) -> None:
         """Open a new position with risk-managed sizing."""
         stop_loss = self.risk_manager.calculate_stop_loss(price, direction)
         take_profit = self.risk_manager.calculate_take_profit(price, direction)
@@ -313,14 +335,16 @@ class TradingBot:
                     pos.stop_loss = stop_loss
                     pos.take_profit = take_profit
 
-            self.trade_logger.log_position_opened({
+            opened_payload = {
                 "symbol": self.config.symbol,
                 "direction": direction,
                 "qty": qty,
                 "price": price,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
-            })
+            }
+            self.trade_logger.log_position_opened(opened_payload)
+            self.explainer.explain_entry(opened_payload, data, self.strategy.name, self.strategy.params)
             logger.info(
                 "Opened %s %d %s @ $%.2f | SL: $%.2f | TP: $%.2f",
                 direction, qty, self.config.symbol, price, stop_loss, take_profit,
@@ -328,7 +352,7 @@ class TradingBot:
         else:
             logger.warning("Order not filled: %s", result.status)
 
-    def _close_position(self, position, price: float) -> None:
+    def _close_position(self, position, price: float, exit_reason: str = "strategy") -> None:
         """Close an existing position."""
         order = Order(
             symbol=position.symbol,
@@ -343,7 +367,7 @@ class TradingBot:
         pnl = position.unrealized_pnl
         pnl_pct = pnl / (position.entry_price * position.qty) if position.entry_price else 0
 
-        self.trade_logger.log_position_closed({
+        closed_payload = {
             "symbol": position.symbol,
             "side": position.side,
             "qty": position.qty,
@@ -351,7 +375,10 @@ class TradingBot:
             "exit_price": price,
             "pnl": pnl,
             "pnl_pct": pnl_pct,
-        })
+            "exit_reason": exit_reason,
+        }
+        self.trade_logger.log_position_closed(closed_payload)
+        self.explainer.explain_exit(closed_payload)
         logger.info("Closed %s | PnL: $%.2f (%.2f%%)", position.symbol, pnl, pnl_pct * 100)
 
     def _on_stop(self) -> None:
@@ -362,6 +389,7 @@ class TradingBot:
             logger.info("PriceMonitor stopped")
         account = self.broker.get_account_info()
         self.trade_logger.write_daily_summary(account)
+        self.explainer.daily_digest(account)
         logger.info("Bot stopped. Final portfolio value: $%.2f", account["portfolio_value"])
 
     def _shutdown(self, signum, frame) -> None:
